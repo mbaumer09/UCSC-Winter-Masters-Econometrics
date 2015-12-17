@@ -1,0 +1,136 @@
+---
+title: "randomForest"
+author: "Matthew Baumer"
+date: "December 16, 2015"
+output: html_document
+---
+
+This example will utilize one of the most user-friendly approaches to predictive modeling: a random forest. A forest is a big group of trees, which is exactly what we will be doing here. We will grow a large number of trees using random feature selection (bootstrap samples of features, to be specific!) and then, to make predictions for new data, we will plug the new vector of inputs into all of those trees and whichever outcome wins in the vote is our prediction.
+ 
+## Download data, add column names, split it into training and test set
+
+We split this into a training and a test set because this data source doesn't provide separate training and test sets to us.
+
+```{r}
+library(caret)
+
+# Download adult income data
+url.train <- "http://archive.ics.uci.edu/ml/machine-learning-databases/housing/housing.data"
+url.names <- "http://archive.ics.uci.edu/ml/machine-learning-databases/housing/housing.names"
+download.file(url.train, destfile = "HousingValues.csv")
+download.file(url.names, destfile = "HousingFeatureNames.txt")
+
+# Read the training and test data into memory
+set.seed(123)
+train <- read.table("HousingValues.csv")
+
+
+# Feature names can be found by referring to the downloaded names .txt file above
+names(train) <- c("CRIM",      #per capita crime rate by town
+                  "ZN",        #proportion of residential land zoned for lots over 25,000 sq.ft.
+                  "INDUS",     #proportion of non-retail business acres per town
+                  "CHAS",      #Charles River dummy variable (= 1 if tract bounds river; 0 otherwise)
+                  "NOX",       #nitric oxides concentration (parts per 10 million)
+                  "RM",        #average number of rooms per dwelling
+                  "AGE",       #proportion of owner-occupied units built prior to 1940
+                  "DIS",       #weighted distances to five Boston employment centres
+                  "RAD",       #index of accessibility to radial highways
+                  "TAX",       #full-value property-tax rate per $10,000
+                  "PTRATIO",   #pupil-teacher ratio by town
+                  "B",         #1000(Bk - 0.63)^2 where Bk is the proportion of African Americans by town
+                  "LSTAT",     #% lower status of the population
+                  "MEDV")      #Median value of owner-occupied homes in $1000's
+      
+inTrain <- createDataPartition(train$MEDV, p = .75, list = FALSE)
+train <- train[inTrain,]
+test <- train[-inTrain,]
+```
+
+## Use caret package to implement random forest model
+
+```{r}
+mtry_def <- floor(sqrt(ncol(train))*.75) # How many columns to select in each bootstrap sample?
+t_grid <- expand.grid(mtry= c(mtry_def))
+
+set.seed(1234)
+start <- proc.time()[3]
+model.rf <- train(MEDV ~ .,
+                  data = train,
+                  method = "rf",
+                  ntree = 50, # How many trees to grow in total?
+                  tuneGrid = t_grid)
+end <- proc.time()[3]
+print(paste("This took ", round(end-start,digits = 1), " seconds", sep = ""))
+print(model.rf)
+```
+## How did our model do?
+
+This is a *regression task* rather than a *classification task* which is what we did in the other examples. Accuracy is a nice metric for classification, but it doesn't really make sense in the context of regression. Instead, we will use root mean square error (RMSE) to estimate how well our random forest was able to predict our test set outcomes.
+```{r}
+predictions <- predict(model.rf, test[,1:13])
+RMSE <- sqrt(sum((predictions - test$MEDV)^2)/length(predictions))
+print(RMSE)
+```
+
+## How to interpret this RMSE?
+
+RMSE is measured in the same units as our outcome; one sensible approach to interpret the RMSE is then to divide it by the mean of our outcome variable so we can interpret in terms of percentage of the mean:
+
+```{r}
+print(RMSE/mean(test$MEDV)) 
+
+```
+
+We see that the RMSE is only about 9% as large as the mean of our outcome, not bad! But we can probably do better. What if we include more columns in our bootstramp sample? This time, we will not specify tuneGrid so caret will automatically scan over different levels of mtry, which controls how many columns to sample for each tree.
+
+```{r}
+set.seed(1234)
+start <- proc.time()[3]
+model.rf <- train(MEDV ~ .,
+                  data = train,
+                  method = "rf",
+                  ntree = 50)
+end <- proc.time()[3]  
+print(paste("This took ", round(end-start,digits = 1), " seconds", sep = ""))
+print(model.rf)
+```
+## Now how did our model do?
+
+```{r}
+predictions <- predict(model.rf, test[,1:13])
+RMSE <- sqrt(sum((predictions - test$MEDV)^2)/length(predictions))
+print(RMSE/mean(test$MEDV))
+
+```
+
+Instead of 2 columns, caret tried lots of options and ended up using 7 columns. Now our root mean squared error is about 7% of the mean; nice improvement! What happens if we grow more trees, say 500 trees instead of 50 as well as letting caret scan over different values of mtry?
+
+```{r}
+set.seed(1234)
+start <- proc.time()[3]
+model.rf <- train(MEDV ~ .,
+                  data = train,
+                  method = "rf",
+                  ntree = 500)
+print(model.rf)
+end <- proc.time()[3]
+print(paste("This took ", round(end-start,digits = 1), " seconds", sep = ""))
+```
+## How did our model do this time?
+
+```{r}
+predictions <- predict(model.rf, test[,1:13])
+RMSE <- sqrt(sum((predictions - test$MEDV)^2)/length(predictions))
+print(RMSE/mean(test$MEDV))
+
+```
+
+RMSE reduced to about 5.9% as large as the mean of our outcome. But notice the extra computation time that was required! randomForest can be very computationally intensive with lots of big trees and large data set. Random forest also does not lend itself very well to intuitive understanding of the relationships between features of your data or data visualization. It generally does a very good job at prediction, but lacks in pretty much every other desirable dimension.
+
+45 seconds may not seem like very much time, but remember that this data only has 506 observations of 13 variables; many data sets (such as the adult income data used in other examples) will have tens or hundreds of thousands (or even more!) observations and random forest can start to take quite a bit of time to complete! They are very nice for benchmarking; get your model running, wait a few hours for it to finish, and see how accurate it was and now you know what to shoot for when trying other methods that aren't so slow.
+
+```{r}
+plot(model.rf$finalModel)
+```
+
+Looks like after about 300 trees, not much improvement in error level

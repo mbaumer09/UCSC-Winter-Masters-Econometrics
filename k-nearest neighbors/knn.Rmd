@@ -1,0 +1,212 @@
+---
+title: "k Nearest Neighbors"
+author: "Matthew Baumer"
+date: "December 16, 2015"
+output: html_document
+---
+
+## Download the data and do basic cleaning
+
+```{r}
+# This example will construct a basic decision tree using the rpart package
+# to predict whether an individual's income is greater or less than 50k USD 
+# based on 14 observable predictors
+
+setwd("C:/Users/USER/Dropbox/Side Project/Machine Learning/Alan Examples/Decision Tree") 
+library(caret)
+library(ElemStatLearn)
+
+# Download adult income data
+url.train <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
+url.test <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test"
+url.names <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.names"
+download.file(url.train, destfile = "adult_train.csv")
+download.file(url.test, destfile = "adult_test.csv")
+download.file(url.names, destfile = "adult_names.txt")
+
+# Read the training and test data into memory
+train <- read.csv("adult_train.csv", header = FALSE)
+
+# The test data has an unnecessary first line that messes stuff up, this fixes that problem
+all_content <- readLines("adult_test.csv")
+skip_first <- all_content[-1]
+test <- read.csv(textConnection(skip_first), header = FALSE)
+
+# The data file doesn't have the column names in its header, add those in manually...
+varNames <- c("Age", 
+              "WorkClass",
+              "fnlwgt",
+              "Education",
+              "EducationNum",
+              "MaritalStatus",
+              "Occupation",
+              "Relationship",
+              "Race",
+              "Sex",
+              "CapitalGain",
+              "CapitalLoss",
+              "HoursPerWeek",
+              "NativeCountry",
+              "IncomeLevel")
+
+names(train) <- varNames
+names(test) <- varNames
+levels(test$IncomeLevel) <- levels(train$IncomeLevel)
+file.remove("adult_train.csv")
+file.remove("adult_test.csv")
+```
+
+k-nearest neighbors is computationally heavy, particularly in high dimensionality, so let's reduce the number of observations to half and set the other half of observations aside for a validation set. Validation sets are particularly useful if you don't have a test data set with observed outcomes; you train your model on your training data set and then use the validation set to estimate out-of-sample accuracy and then retrain a new model if necessary.
+
+Next, we will apply lessons from feature selection to decide which predictors to keep and which to throw away, otherwise this will take a very long time to finish. I will use varImp() to determine which variables I want to include, but that's not the only way to make the decision!
+```{r}
+set.seed(3626)
+inTrain <- createDataPartition(train$IncomeLevel, p = .5, list = FALSE)
+train <- train[inTrain,]
+validation <- train[-inTrain,]
+model.tree  <- train(IncomeLevel ~ .,
+                   data = train,
+                   method = "rpart")
+plot(varImp(model.tree), top = 10)
+```
+
+This plot looks weird because the factors are getting converted into dummy variables for the tree growing process, but there is a clear message here. CapitalGain, MaritalStatus, EducationNum, Age, and Occupation look like our top 5 predictors, so let's just use them:
+
+```{r}
+keeps <- c("CapitalGain",
+           "MaritalStatus",
+           "EducationNum",
+           "Age",
+           "Occupation",
+           "IncomeLevel")
+train <- train[,which(names(train) %in% keeps)]
+validation <- validation[,which(names(validation) %in% keeps)]
+test <- test[,which(names(test) %in% keeps)]
+```
+
+Now we implement a k-nn model using the caret package using only this subset of predictors:
+```{r}
+# k Nearest Neighbors
+start <- proc.time()[3]
+set.seed(1422)
+model.knn <- train(IncomeLevel ~ .,
+                  data = train,
+                  method = "knn")
+print(model.knn)
+```
+
+This process selected k = 9 as it gave the highest accuracy on bootstrapped resamples of the test data. How does this do on our validation and test data sets?
+
+```{r}
+validation.predictions <- predict(model.knn, validation[,1:5])
+validation.acc <- sum(validation.predictions == validation[,6])/length(validation[,6])
+print(paste("The model correctly predicted the validation set outcome ", round(validation.acc*100,digits=2), "% of the time", sep=""))
+predictions <- predict(model.knn, test[,1:5])
+accuracy <- sum(predictions == test[,6])/length(test[,6])
+print(paste("The model correctly predicted the test outcome ", round(accuracy*100,digits=2), "% of the time", sep=""))
+end <- proc.time()[3]
+print(paste("This took ", round(end-start, digits = 2), " seconds", sep=""))
+```
+
+It was about 85% accurate, not too bad but only a slight improvement (possibly even within margin of error) over our simple decision tree approach. On your own, I suggest that you try to run the k-nn model on the full training set without removing any columns to see how much longer it takes and see its effect on the model's out-of-sample prediction accuracy. It might surprise you!
+
+
+## Visualization
+This is taken with slight modification from ?mixture.example from ElemStatLearn package. Let's look at a visual representation of a k-nn classification procedure using simulated data. Scroll to the bottom for the nice pictures.
+
+```{r}
+data(mixture.example)
+par(mfrow = c(2,3))
+x <- mixture.example$x
+g <- mixture.example$y
+x.mod <- lm( g ~ x)
+# Figure 2.1:
+plot(x, col=ifelse(g==1,"red", "green"), xlab="x1", ylab="x2", main = "OLS")
+abline( (0.5-coef(x.mod)[1])/coef(x.mod)[3], -coef(x.mod)[2]/coef(x.mod)[3])
+ghat <- ifelse( fitted(x.mod)>0.5, 1, 0)
+
+xnew <- mixture.example$xnew
+
+library(class)
+mod1 <- knn(x[,1:2], xnew[,1:2], g, k=1, prob=TRUE)
+prob <- attr(mod1, "prob")
+prob <- ifelse( mod1=="1", prob, 1-prob) # prob is voting fraction for winning class!
+# Now it is voting fraction for red==1
+
+px1 <- mixture.example$px1
+px2 <- mixture.example$px2
+
+prob1 <- matrix(prob, length(px1), length(px2))
+contour(px1, px2, prob1, levels=0.5, labels="", xlab="x1", ylab="x2", main=
+              "1-nearest neighbour")
+# adding the points to the plot:
+points(x, col=ifelse(g==1, "red", "green"))
+
+mod3 <- knn(x, xnew, g, k=3, prob=TRUE)
+prob <- attr(mod3, "prob")
+prob <- ifelse( mod3=="1", prob, 1-prob) # prob is voting fraction for winning class!
+# Now it is voting fraction for red==1
+
+px1 <- mixture.example$px1
+px2 <- mixture.example$px2
+
+prob3 <- matrix(prob, length(px1), length(px2))
+contour(px1, px2, prob3, levels=0.5, labels="", xlab="x1", ylab="x2", main=
+              "3-nearest neighbour")
+# adding the points to the plot:
+points(x, col=ifelse(g==1, "red", "green"))
+
+mod15 <- knn(x, xnew, g, k=10, prob=TRUE)
+
+
+prob <- attr(mod15, "prob")
+prob <- ifelse( mod15=="1", prob, 1-prob) # prob is voting fraction for winning class!
+# Now it is voting fraction for red==1
+
+px1 <- mixture.example$px1
+px2 <- mixture.example$px2
+
+prob15 <- matrix(prob, length(px1), length(px2))
+contour(px1, px2, prob15, levels=0.5, labels="", xlab="x1", ylab="x2", main=
+              "10-nearest neighbour")
+# adding the points to the plot:
+points(x, col=ifelse(g==1, "red", "green"))
+
+mod20 <- knn(x, xnew, g, k=25, prob=TRUE)
+
+
+prob <- attr(mod20, "prob")
+prob <- ifelse( mod20=="1", prob, 1-prob) # prob is voting fraction for winning class!
+# Now it is voting fraction for red==1
+
+px1 <- mixture.example$px1
+px2 <- mixture.example$px2
+
+prob20 <- matrix(prob, length(px1), length(px2))
+contour(px1, px2, prob20, levels=0.5, labels="", xlab="x1", ylab="x2", main=
+              "25-nearest neighbour")
+# adding the points to the plot:
+points(x, col=ifelse(g==1, "red", "green"))
+
+mod50 <- knn(x, xnew, g, k=50, prob=TRUE)
+
+
+prob <- attr(mod50, "prob")
+prob <- ifelse( mod50=="1", prob, 1-prob) # prob is voting fraction for winning class!
+# Now it is voting fraction for red==1
+
+px1 <- mixture.example$px1
+px2 <- mixture.example$px2
+
+prob50 <- matrix(prob, length(px1), length(px2))
+contour(px1, px2, prob50, levels=0.5, labels="", xlab="x1", ylab="x2", main=
+              "50-nearest neighbour")
+# adding the points to the plot:
+points(x, col=ifelse(g==1, "red", "green"))
+```
+
+Notice that as the k parameter gets larger, it gets smoother and smoother. When k=1, there are many different small "islands" that are basically predicting single data points; this is an example of overfitting to the training set. 
+
+But when k=50, you see a large number of green points being misclassified on the right side of the plot. 
+
+The case of k=25 seems to create a reasonable boundary that is fit to the data without too much overfitting in the sense that the red dots that are "out of place" are reasonably classified as green but the boundary manages to correctly classify the set of green dots that are misclassified in the smoother boundary determined at k=50.

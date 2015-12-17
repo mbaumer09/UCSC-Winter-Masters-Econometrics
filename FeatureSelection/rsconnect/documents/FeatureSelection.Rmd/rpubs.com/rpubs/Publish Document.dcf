@@ -1,0 +1,7 @@
+name: Publish Document
+account: rpubs
+server: rpubs.com
+bundleId:
+        https://api.rpubs.com/api/v1/document/135354/af773f3d316c4f7c80b2e586ec5fb15a
+url: http://rpubs.com/mbaumer/135354
+when: 1450309481.40507

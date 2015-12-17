@@ -1,0 +1,68 @@
+---
+title: "NeuralNetwork"
+author: "Matthew Baumer"
+date: "December 16, 2015"
+output: html_document
+---
+
+This example will predict whether an individual's income is greater or less than 50k USD based on 14 observable predictors by implementing a neural network approach
+
+## Download data, load data into memory, add column names
+```{r}
+library(caret)
+library(nnet)
+
+url.train <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
+url.test <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test"
+url.names <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.names"
+download.file(url.train, destfile = "adult_train.csv")
+download.file(url.test, destfile = "adult_test.csv")
+download.file(url.names, destfile = "adult_names.txt")
+
+# Read the training and test data into memory
+train <- read.csv("adult_train.csv", header = FALSE)
+
+# The test data has an unnecessary first line that messes stuff up, this fixes that problem
+all_content <- readLines("adult_test.csv")
+skip_first <- all_content[-1]
+test <- read.csv(textConnection(skip_first), header = FALSE)
+
+# The data file doesn't have the column names in its header, add those in manually...
+varNames <- c("Age", 
+              "WorkClass",
+              "fnlwgt",
+              "Education",
+              "EducationNum",
+              "MaritalStatus",
+              "Occupation",
+              "Relationship",
+              "Race",
+              "Sex",
+              "CapitalGain",
+              "CapitalLoss",
+              "HoursPerWeek",
+              "NativeCountry",
+              "IncomeLevel")
+
+names(train) <- varNames
+names(test) <- varNames
+levels(test$IncomeLevel) <- levels(train$IncomeLevel)
+file.remove("adult_train.csv")
+file.remove("adult_test.csv")
+```
+# Neural Network package nnet
+
+Use caret package to train a model using neural net
+```{r, results = "hide"}
+start <- proc.time()[3]
+model.nn <- train(IncomeLevel ~ .,
+                  data = train,
+                  method = "nnet")
+```
+```{r}
+print(model.nn)
+predictions <- predict(model.nn, test[,1:14])
+accuracy <- sum(predictions == test[,15])/length(test[,15])
+print(accuracy)
+end <- proc.time()[3]
+```
