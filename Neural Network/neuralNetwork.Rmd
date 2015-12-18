@@ -11,6 +11,7 @@ This example will predict whether an individual's income is greater or less than
 ```{r}
 library(caret)
 library(nnet)
+library(NeuralNetTools)
 
 url.train <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
 url.test <- "http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test"
@@ -54,6 +55,7 @@ file.remove("adult_test.csv")
 
 Use caret package to train a model using neural net
 ```{r, results = "hide"}
+set.seed(1414)
 start <- proc.time()[3]
 model.nn <- train(IncomeLevel ~ .,
                   data = train,
@@ -65,4 +67,97 @@ predictions <- predict(model.nn, test[,1:14])
 accuracy <- sum(predictions == test[,15])/length(test[,15])
 print(accuracy)
 end <- proc.time()[3]
+print(paste("This took ", round(end-start, digits = 1), " seconds", sep = ""))
+```
+
+Using the full data, this took quite a long time to finish! Let's see if we can make this go any faster by applying lessons we learned from our feature selection discussion. But the methods we used in that example were for a *regression* problem and now we are doing *classification*, so we have to try something else! 
+
+One thing we can do is use linear discriminant analysis (LDA) which is similar to principal component analysis (PCA) in that it attempts to generate linear combinations of input variables that generate the most explanatory power over the output variable; it is actually likely not optimal for this purpose because it requires the assumption of normally distributed explanatory variables, which is unlikely the case for many of these inputs. This is just an example of utilizing varImp() for classification.
+
+```{r, warning = FALSE}
+set.seed(1414)
+model.lda <- train(IncomeLevel ~ .,
+                  data = train,
+                  method = "lda")
+plot(varImp(model.lda))
+```
+
+Looks like our top 5 according to an ROC curve are `EducationNum`, `Relationship`, `Age`, `HoursPerWeek`, and `MaritalStatus`. Let's rerun the model using only those 5 explanatory variables and see if we have better run time without having sacrificed much accuracy.
+
+```{r, results = "hide"}
+keeps <- c("EducationNum",
+           "Relationship",
+           "Age",
+           "HoursPerWeek",
+           "MaritalStatus",
+           "IncomeLevel")
+
+train.reduced <- train[,which(names(train) %in% keeps)]
+test.reduced <- test[,which(names(test) %in% keeps)]
+set.seed(1414)
+start <- proc.time()[3]
+model.nn <- train(IncomeLevel ~ .,
+                     data = train.reduced,
+                     method = "nnet")
+```
+```{r}
+print(model.nn)
+
+predictions <- predict(model.nn, test.reduced[,1:5])
+accuracy <- sum(predictions == test.reduced[,6])/length(test.reduced[,6])
+print(accuracy)
+end <- proc.time()[3]
+print(round(end-start, digits = 1))
+```
+
+And now we again see the importance of feature selection! We managed to decrease the runtime of our model by almost two thirds and actually managed a very slight **increase** in out-of-sample accuracy. Other ways we could continue trying to improve this model is using the tuneGrid argument in train() to have it scan over a larger set of different sizes and decay parameters.
+
+## Neural Network Visualization
+
+Last thing, how can we visualize what our model is doing? Neural networks are pretty complicated, involving non-linear transformations of our inputs into a 'hidden layer' of nodes that are then translated into our output prediction with a potentially very large number of parameters involved. The package NeuralNetTools has some nice functions available to us to try to make sense of it, though!
+
+But, since we want to make this a nice picture, let's not use categorical input variables; they will get converted into a number of dummies equal to the number of levels of the variable minus one, which makes a potentially ugly picture. We again reduce the training set but this time to the top 5 variables that are continuous or binary categorical and then generate a new neural network model.
+
+```{r, results="hide"}
+keeps <- c("EducationNum",
+           "Age",
+           "HoursPerWeek",
+           "Sex",
+           "CapitalGain",
+           "IncomeLevel")
+
+train.reduced <- train[,which(names(train) %in% keeps)]
+test.reduced <- test[,which(names(test) %in% keeps)]
+set.seed(1414)
+start <- proc.time()[3]
+model.nn <- train(IncomeLevel ~ .,
+                  data = train.reduced,
+                  method = "nnet")
+```
+```{r}
+print(model.nn)
+predictions <- predict(model.nn, test.reduced[,1:5])
+accuracy <- sum(predictions == test.reduced[,6])/length(test.reduced[,6])
+print(accuracy)
+end <- proc.time()[3]
+print(round(end-start, digits = 1))
+```
+
+## Now for our nice picture
+
+```{r, fig.height=8, fig.width=12}
+plotnet(model.nn$finalModel, y_names = "IncomeLevel")
+title("Graphical Representation of our Neural Network")
+```
+
+The width of the connecting lines represent the relative weights between nodes and the colors represent direction, black for positive and grey for negative. B1 and B2 represent bias nodes that function similarly to the constant term in your standard OLS regression.
+
+You can see that the `CapitalGain` input has a large positive weight with the 4th node in the hidden layer, while the bias term for the hidden layer has a large positive weight with the 1st node in the hidden layer and a large negative weight with the 3rd node in the hidden layer. 
+
+The last important aspect of neural networks is that they are sensitive to initial conditions; notice that in the code above, we used the set.seed() function so that R will generate the same "random" numbers every time this code is executed and thus will give the same results; try changing the seed to a different number and you will see that the network diagram may have different weights.
+
+
+## Bonus: another methodology to estimate relative feature importance! 
+```{r}
+garson(model.nn$finalModel)
 ```
