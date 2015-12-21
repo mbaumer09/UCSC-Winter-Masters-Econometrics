@@ -1,0 +1,7 @@
+name: Publish Document
+account: rpubs
+server: rpubs.com
+bundleId:
+        https://api.rpubs.com/api/v1/document/136279/7fbee8b755d348d4a798e77c4ca01df3
+url: http://rpubs.com/mbaumer/136279
+when: 1450736598.59396
